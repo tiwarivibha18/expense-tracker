@@ -7,10 +7,9 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func
 import os
 
-from backend import models
-from backend.database import SessionLocal, engine
-from backend.models import Expense
-from backend.schemas import ExpenseCreate, ExpenseOut
+from . import models
+from .database import SessionLocal, engine
+from .schemas import ExpenseCreate, ExpenseOut
 
 # Create tables
 models.Base.metadata.create_all(bind=engine)
