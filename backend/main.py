@@ -4,13 +4,20 @@ from typing import List, Optional
 from datetime import date
 import hashlib
 from fastapi.responses import HTMLResponse
-from database import SessionLocal, engine
-import models, schemas
 from sqlalchemy import func
+import os
+
+from backend import models
+from backend.database import SessionLocal, engine
+from backend.models import Expense
+from backend.schemas import ExpenseCreate, ExpenseOut
+
+# Create tables
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Expense Tracker")
 
+# Dependency to get DB session
 def get_db():
     db = SessionLocal()
     try:
@@ -18,26 +25,27 @@ def get_db():
     finally:
         db.close()
 
-def generate_idempotency_key(expense: schemas.ExpenseCreate):
+# Idempotency key generator to handle retries
+def generate_idempotency_key(expense: ExpenseCreate):
     raw = f"{expense.amount}{expense.category}{expense.description}{expense.date}"
     return hashlib.sha256(raw.encode()).hexdigest()
-    
 
-@app.post("/expenses", response_model=schemas.ExpenseOut)
+# POST /expenses - Create a new expense
+@app.post("/expenses", response_model=ExpenseOut)
 def create_expense(
-    expense: schemas.ExpenseCreate,
+    expense: ExpenseCreate,
     db: Session = Depends(get_db)
 ):
     key = generate_idempotency_key(expense)
 
-    existing = db.query(models.Expense).filter(
-        models.Expense.idempotency_key == key
+    existing = db.query(Expense).filter(
+        Expense.idempotency_key == key
     ).first()
 
     if existing:
         return existing
 
-    db_expense = models.Expense(
+    db_expense = Expense(
         amount=expense.amount,
         category=expense.category,
         description=expense.description,
@@ -50,14 +58,15 @@ def create_expense(
     db.refresh(db_expense)
     return db_expense
 
+# GET /expenses/summary - Total per category
 @app.get("/expenses/summary")
 def expense_summary(db: Session = Depends(get_db)):
     results = (
         db.query(
-            models.Expense.category,
-            func.sum(models.Expense.amount).label("total")
+            Expense.category,
+            func.sum(Expense.amount).label("total")
         )
-        .group_by(models.Expense.category)
+        .group_by(Expense.category)
         .all()
     )
 
@@ -66,24 +75,26 @@ def expense_summary(db: Session = Depends(get_db)):
         for r in results
     ]
 
-@app.get("/expenses", response_model=List[schemas.ExpenseOut])
+# GET /expenses - List expenses with optional filters
+@app.get("/expenses", response_model=List[ExpenseOut])
 def get_expenses(
     category: Optional[str] = None,
     sort: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    query = db.query(models.Expense)
+    query = db.query(Expense)
 
     if category:
-        query = query.filter(models.Expense.category == category)
+        query = query.filter(Expense.category == category)
 
     if sort == "date_desc":
-        query = query.order_by(models.Expense.date.desc())
+        query = query.order_by(Expense.date.desc())
 
     return query.all()
 
-
+# GET / - Serve frontend HTML
 @app.get("/", response_class=HTMLResponse)
 def home():
-    with open("index.html") as f:
+    file_path = os.path.join(os.path.dirname(__file__), "index.html")
+    with open(file_path, "r") as f:
         return f.read()
